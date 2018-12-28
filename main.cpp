@@ -40,6 +40,7 @@ struct Location {
     }
     void print() {
         std::cout << static_cast<char>(y + 'A') << static_cast<char>(x + '1') << std::endl;
+        std::cerr << static_cast<char>(y + 'A') << static_cast<char>(x + '1') << std::endl;
     }
 };
 
@@ -130,19 +131,19 @@ class Board {
 			for (uint8_t i = 0; i < 8; i++) {
 				for (uint8_t j = 0; j < 8; j++) {
 					if (!isOccupied(j, i)) {
-                        if (doesMoveFlip({Location{j, i}, currentPlayer})) std::cout << "#";
-						else std::cout << '.';
+                        if (doesMoveFlip({Location{j, i}, currentPlayer})) std::cerr << "#";
+						else std::cerr << '.';
 						continue;
 					}
 					if (getColor(j, i) == Black) {
-						std::cout << 'b';
+						std::cerr << 'b';
 					} else {
-						std::cout << 'w';
+						std::cerr << 'w';
 					}
 				}
-				std::cout << std::endl;
+				std::cerr << std::endl;
 			}
-            std::cout << std::endl;
+            std::cerr << std::endl;
 		}
 
         bool matrixIsFilled() {
@@ -217,6 +218,8 @@ class Board {
         // returns amount of placements written to vector
         std::vector<Location> getPossibleMoves() {
             std::vector<Location> out;
+            //TODO: work out if this helps at all:
+            if (matrixIsFilled()) return out;
             bool hasFlippingMove = false;
             for (uint8_t y = 0; y < 8; y++) {
                 for (uint8_t x = 0; x < 8; x++) {
@@ -248,9 +251,9 @@ class Board {
             // 30 is always a loss;
             int nbits = std::bitset<64>(colors).count();
             if (player == Black) {
-                return nbits > 30;
-            } else {
                 return nbits < 30;
+            } else {
+                return nbits > 30;
             }
             return false;
         }
@@ -263,8 +266,8 @@ class Node {
         Node * parent;
         std::vector<Node*> children;
         std::vector<Location> untriedMoves;
-        int wonGames;
-        int playedGames;
+        int wonGames = 0;
+        int playedGames = 0;
         Color playerToMove;
         
         // root initialization
@@ -287,7 +290,7 @@ class Node {
 
         // returns child with highest UCB1
         Node * UCTSelectChild() {
-            float mx = 0;
+            float mx = -1;
             float other;
             float simulations = static_cast<float>(playedGames);
             Node * best;
@@ -300,7 +303,7 @@ class Node {
                     best = c;
                 }
             }
-            std::cout << mx << std::endl;
+            // std::cout << mx << std::endl;
             return best;
         }
 
@@ -321,20 +324,19 @@ class Node {
 
 class Tree {
     private:
-        void selection() {
+        bool selection() {
             while (cursor->untriedMoves.empty()) {
                 cursor = cursor->UCTSelectChild();
-                // cursor->move.print();
-                // state.print();
                 state.place(Placement{cursor->move, state.currentPlayer});
-                // state.print();
+                if (state.matrixIsFilled()) return false;
             }            
+            return true;
         }
         void expansion() {
+            // if (state.matrixIsFilled()) return;
             int index = rand() % cursor->untriedMoves.size();
             Location newMove = cursor->untriedMoves[index];
             state.place(Placement{newMove, state.currentPlayer});
-            // state.print();
             Node * newChild = new Node(state, cursor);
             newChild->move = newMove;
             cursor->children.push_back(newChild);
@@ -351,6 +353,7 @@ class Tree {
                 state.place(Placement{move, state.currentPlayer});
                 // state.print();
                 Node * newChild = new Node(state, cursor);
+                newChild->move = move;
                 cursor->children.push_back(newChild);
                 cursor->untriedMoves.erase(
                     std::find(
@@ -371,13 +374,15 @@ class Tree {
                     cursor->playedGames++;
                     cursor = cursor->parent;
                 }
+                root->playedGames++;
+                root->wonGames++;
             } else {
                 while (cursor != root) {
                     cursor->playedGames++;
                     cursor = cursor->parent;
                 }
+                root->playedGames++;
             }
-            root->playedGames++;
         }
 
     public:
@@ -408,6 +413,7 @@ class Tree {
 
         void makeChildRoot(Node * newRoot) {
             rootState.place(Placement{newRoot->move, rootState.currentPlayer});
+            rootState.print();
             root->makeChildRoot(newRoot);
             root = newRoot;
             cursor = root;
@@ -415,20 +421,24 @@ class Tree {
 
         void MCTS(clock_t endTime) {
             do {
+            // for (int i = 0; i < 800; i++) {
                 // std::cout << "MCTS simulation" << std::endl;
+                // std::cerr << "Time left begin: " << endTime - clock() << std::endl;
                 state = Board(rootState);
                 // std::cout << "Selection" << std::endl;
-                selection();
+                if (selection()) expansion();
                 // std::cout << "Expansion" << std::endl;
-                expansion();
+                // expansion();
                 // std::cout << "Simulation" << std::endl;
                 simulation();
                 // std::cout << "Backpropagation" << std::endl;
                 backpropagation();
+                // std::cerr << "Time left end: " << endTime - clock() << std::endl;
             } while (clock() < endTime);
-            // std::cout << "Finished" << std::endl;
-            // std::cout << "Played games: " << root->playedGames << std::endl;
-            // std::cout << "Won games: " << root->wonGames << std::endl;
+            // }
+            std::cerr << "---" << std::endl;
+            std::cerr << "Played games: " << root->playedGames << std::endl;
+            std::cerr << "Won games: " << root->wonGames << std::endl;
         }
 
         void printDOT() {
@@ -441,7 +451,7 @@ class Tree {
             for (auto c : root->children) {
                 if (c->move == opponentMove) {
                     makeChildRoot(c);
-                    break;
+                    return;
                 }
             }
             std::cerr << "Error: opponent did move that isn't a child" << std::endl;
@@ -459,6 +469,7 @@ Location parseString(std::string word) {
 }
 
 int main() {
+    clock_t absBeginTime = clock();
     Tree t(White);
     std::string word;
     std::cin >> word;
@@ -466,17 +477,28 @@ int main() {
     if (word == "Start") {
         t = Tree(Black);
     } else {
-        t.state.place(Placement{parseString(word), Black});
+        Location l = parseString(word);
+        t.rootState.place(Placement{l, Black});
+        Node * newRoot = new Node(t.rootState, t.root);
+        newRoot->move = l;
+        t.root->children.push_back(newRoot);
+        t.makeChildRoot(newRoot);
     }
-    const clock_t extraTime = 0.14*CLOCKS_PER_SEC;
+    // const clock_t extraTime = 0.05*CLOCKS_PER_SEC;
+    const clock_t extraTime = 0.13*CLOCKS_PER_SEC;
     while (!t.rootState.matrixIsFilled()) {
         t.MCTS(beginTime + extraTime);
+        // std::cerr << "MCTS done, timediff: " << static_cast<float>(clock() - absBeginTime) / CLOCKS_PER_SEC << std::endl;
         Node * bestChild = t.mostVisitedChild();
+        // std::cerr << "Current move: " << '0' + bestChild->move.x << ", " << '0' + bestChild->move.y << std::endl;
         bestChild->move.print();
+        // std::cerr << "Printed current move!" << std::endl;
         t.makeChildRoot(bestChild);
         std::cin >> word;
+        // std::cerr << "Timediff: " << static_cast<float>(clock() - absBeginTime) / CLOCKS_PER_SEC << std::endl;
         beginTime = clock();
         t.advance(parseString(word));
+        std::cerr << "Timediff since fork: " << static_cast<float>(clock() - absBeginTime) / CLOCKS_PER_SEC << std::endl;
     }
     // std::cout << "EOF" << std::endl;
 	return 0;
