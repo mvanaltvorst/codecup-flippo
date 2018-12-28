@@ -224,7 +224,7 @@ class Board {
                     Placement p = Placement{Location{x, y}, currentPlayer};
                     if (doesMoveFlip(p)) {
                         hasFlippingMove = true;
-                        moves.push_back(Location{x, y});
+                        out.push_back(Location{x, y});
                     }
                 }
             }           
@@ -234,7 +234,7 @@ class Board {
                     for (uint8_t x = 0; x < 8; x++) {
                         for (auto &d : directions) {
                             if (isOccupied(x + d.first, y + d.second)) {
-                                moves.push_back(Location{x, y});
+                                out.push_back(Location{x, y});
                                 break;
                             }
                         }
@@ -242,6 +242,17 @@ class Board {
                 }
             }
             return out;
+        }
+        
+        bool isWinner(Color player) {
+            // 30 is always a loss;
+            int nbits = std::bitset<64>(colors).count();
+            if (player == Black) {
+                return nbits > 30;
+            } else {
+                return nbits < 30;
+            }
+            return false;
         }
 };
 
@@ -252,12 +263,12 @@ class Node {
         Node * parent;
         std::vector<Node*> children;
         std::vector<Location> untriedMoves;
-        int winnedGames;
+        int wonGames;
         int playedGames;
         Color playerToMove;
         
         // root initialization
-        Node(Board &state) : parent(NULL), move(NULL) {
+        Node(Board &state) : parent(NULL) {
             untriedMoves = state.getPossibleMoves();
             playerToMove = state.currentPlayer;
         }
@@ -278,21 +289,24 @@ class Node {
         Node * UCTSelectChild() {
             float mx = 0;
             float other;
-            float simulations = float(playedGames);
+            float simulations = static_cast<float>(playedGames);
             Node * best;
             for (auto c : children) {
+                // std::cout << simulations << std::endl;
                 other = c->UCB1(simulations); 
+                // std::cout << other << std::endl;
                 if (other > mx) {
                     mx = other;
                     best = c;
                 }
             }
+            std::cout << mx << std::endl;
             return best;
         }
 
         float UCB1(float simulations) {
             float pg = float(playedGames);
-            return (float(winnedGames) / pg) + sqrt(log(simulations) / pg);
+            return (float(wonGames) / pg) + sqrt(log(simulations) / pg);
         }
 
         void makeChildRoot(Node * newRoot) {
@@ -308,30 +322,62 @@ class Node {
 class Tree {
     private:
         void selection() {
-            while (!cursor->untriedMoves.empty()) {
+            while (cursor->untriedMoves.empty()) {
                 cursor = cursor->UCTSelectChild();
+                // cursor->move.print();
+                // state.print();
+                state.place(Placement{cursor->move, state.currentPlayer});
+                // state.print();
             }            
         }
         void expansion() {
-            int index = rand() % cursor->children.size();
+            int index = rand() % cursor->untriedMoves.size();
             Location newMove = cursor->untriedMoves[index];
             state.place(Placement{newMove, state.currentPlayer});
+            // state.print();
             Node * newChild = new Node(state, cursor);
+            newChild->move = newMove;
             cursor->children.push_back(newChild);
             cursor->untriedMoves.erase(cursor->untriedMoves.begin() + index); // erase from untried moves
             cursor = newChild;
         }
 
         void simulation() {
-            std::vector<Location> moves;
+            Location move;
             while (!state.matrixIsFilled()) {
-                moves = state.getPossibleMoves();
-                state.place(Placement{moves[rand() % moves.size()], state.currentPlayer});
+                move = cursor->untriedMoves[rand() % cursor->untriedMoves.size()];
+                // std::cout << "doing move:";
+                // move.print();
+                state.place(Placement{move, state.currentPlayer});
+                // state.print();
+                Node * newChild = new Node(state, cursor);
+                cursor->children.push_back(newChild);
+                cursor->untriedMoves.erase(
+                    std::find(
+                        cursor->untriedMoves.begin(), 
+                        cursor->untriedMoves.end(),
+                        move
+                    )
+                );
+                cursor = newChild;
+                // std::cout << "Untried moves: " << cursor->untriedMoves.size() << std::endl;
             }
         }
 
         void backpropagation() {
-
+            if (state.isWinner(playerPiece)) {
+                while (cursor != root) {
+                    cursor->wonGames++;
+                    cursor->playedGames++;
+                    cursor = cursor->parent;
+                }
+            } else {
+                while (cursor != root) {
+                    cursor->playedGames++;
+                    cursor = cursor->parent;
+                }
+            }
+            root->playedGames++;
         }
 
     public:
@@ -339,8 +385,9 @@ class Tree {
         Node * cursor;
         Board rootState;
         Board state;
+        Color playerPiece;
 
-        Tree() {
+        Tree(Color playerPiece) : playerPiece(playerPiece) {
             root = new Node(rootState);
             cursor = root;
         }
@@ -368,12 +415,20 @@ class Tree {
 
         void MCTS(clock_t endTime) {
             do {
+                // std::cout << "MCTS simulation" << std::endl;
                 state = Board(rootState);
+                // std::cout << "Selection" << std::endl;
                 selection();
+                // std::cout << "Expansion" << std::endl;
                 expansion();
+                // std::cout << "Simulation" << std::endl;
                 simulation();
+                // std::cout << "Backpropagation" << std::endl;
                 backpropagation();
             } while (clock() < endTime);
+            // std::cout << "Finished" << std::endl;
+            // std::cout << "Played games: " << root->playedGames << std::endl;
+            // std::cout << "Won games: " << root->wonGames << std::endl;
         }
 
         void printDOT() {
@@ -404,19 +459,17 @@ Location parseString(std::string word) {
 }
 
 int main() {
-    Tree t;
+    Tree t(White);
     std::string word;
     std::cin >> word;
     clock_t beginTime = clock();
-    Color playerPiece = White;
     if (word == "Start") {
-        playerPiece = Black;
+        t = Tree(Black);
     } else {
-        playerPiece = White;
-        t.state.place(Placement{parseString(word), playerPiece});
+        t.state.place(Placement{parseString(word), Black});
     }
     const clock_t extraTime = 0.14*CLOCKS_PER_SEC;
-    while (t.state.matrixIsFilled()) {
+    while (!t.rootState.matrixIsFilled()) {
         t.MCTS(beginTime + extraTime);
         Node * bestChild = t.mostVisitedChild();
         bestChild->move.print();
@@ -425,5 +478,6 @@ int main() {
         beginTime = clock();
         t.advance(parseString(word));
     }
+    // std::cout << "EOF" << std::endl;
 	return 0;
 }
