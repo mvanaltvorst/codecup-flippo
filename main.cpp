@@ -3,6 +3,7 @@
 #include <vector>
 #include <bitset>
 #include <algorithm>
+#include <cmath>
 
 const std::pair<int, int> directions[8] {
     std::make_pair(0, 1),
@@ -152,7 +153,6 @@ class Board {
 		bool checkPlacement(Location location) {
 			if (location.x < 0 || location.x > 8) return false;
 			if (location.y < 0 || location.y > 8) return false;
-			//if (!getFrontier(location.x, location.y)) return false;
 			if (isOccupied(location.x, location.y)) return false;
 			return true;
 		}
@@ -215,8 +215,8 @@ class Board {
 
         // gets possible moves for currentPlayer
         // returns amount of placements written to vector
-        int getPossibleMoves(std::vector<Placement> &moves) {
-            int index = 0;
+        std::vector<Location> getPossibleMoves() {
+            std::vector<Location> out;
             bool hasFlippingMove = false;
             for (uint8_t y = 0; y < 8; y++) {
                 for (uint8_t x = 0; x < 8; x++) {
@@ -224,8 +224,7 @@ class Board {
                     Placement p = Placement{Location{x, y}, currentPlayer};
                     if (doesMoveFlip(p)) {
                         hasFlippingMove = true;
-                        moves[index] = p;
-                        index++;
+                        moves.push_back(Location{x, y});
                     }
                 }
             }           
@@ -235,86 +234,166 @@ class Board {
                     for (uint8_t x = 0; x < 8; x++) {
                         for (auto &d : directions) {
                             if (isOccupied(x + d.first, y + d.second)) {
-                                moves[index] = Placement{Location{x, y}, currentPlayer};
-                                index++;
+                                moves.push_back(Location{x, y});
                                 break;
                             }
                         }
                     }
                 }
             }
-            return index;
-        }
-
-        // monte carlo
-        Placement calculateBestMove(clock_t timeEnd) {
-            std::vector<Placement> possibleMovesRoot(60);
-            int possibleMovesRootSize = getPossibleMoves(possibleMovesRoot);
-            std::vector<int> amountOfWins (possibleMovesRootSize);
-            std::vector<Placement> possibleMoves(60);
-            for (int i = 0; ; i++) {
-                int index = rand() % possibleMovesRootSize;
-                Board newBoard (*this);
-                newBoard.place(possibleMovesRoot[index]);
-                while (!newBoard.matrixIsFilled()) {
-                    int possibleMovesSize = newBoard.getPossibleMoves(possibleMoves);
-                    newBoard.place(possibleMoves[rand() % possibleMovesSize]);
-                }
-                int winningPieces = std::bitset<64>(newBoard.colors).count();
-                if (currentPlayer == White) winningPieces = 64 - winningPieces;
-                if (winningPieces > 32) amountOfWins[index]++;
-                if (i % 500 == 0) {
-                    // check time, break if no time left
-                    if (clock() > timeEnd) break;
-                }
-            }
-            //printVector(amountOfWins);
-            return possibleMovesRoot[std::max_element(amountOfWins.begin(), amountOfWins.end()) - amountOfWins.begin()];
+            return out;
         }
 };
 
-/*
-struct Node {
-    Board board;
-    std::unique_ptr<Node> parent;
-    std::vector<std::unique_ptr<Node>> children;
-    int winnedGames;
-    int playedGames;
+
+class Node {
+    public:
+        Location move; // the move that got us here
+        Node * parent;
+        std::vector<Node*> children;
+        std::vector<Location> untriedMoves;
+        int winnedGames;
+        int playedGames;
+        Color playerToMove;
+        
+        // root initialization
+        Node(Board &state) : parent(NULL), move(NULL) {
+            untriedMoves = state.getPossibleMoves();
+            playerToMove = state.currentPlayer;
+        }
+
+        // child initialization
+        Node(Board &state, Node * parent) : parent(parent) {
+            untriedMoves = state.getPossibleMoves();
+            playerToMove = state.currentPlayer;
+        } 
+
+        ~Node() {
+            for (auto c : children) {
+                delete c;
+            }
+        }
+
+        // returns child with highest UCB1
+        Node * UCTSelectChild() {
+            float mx = 0;
+            float other;
+            float simulations = float(playedGames);
+            Node * best;
+            for (auto c : children) {
+                other = c->UCB1(simulations); 
+                if (other > mx) {
+                    mx = other;
+                    best = c;
+                }
+            }
+            return best;
+        }
+
+        float UCB1(float simulations) {
+            float pg = float(playedGames);
+            return (float(winnedGames) / pg) + sqrt(log(simulations) / pg);
+        }
+
+        void makeChildRoot(Node * newRoot) {
+            int n = children.size();
+            for (int i = 0; i < n; i++) {
+                if (children[i] == newRoot) continue;
+                delete children[i];
+            }
+            children.clear();
+        }
 };
 
 class Tree {
     private:
-        std::unique_ptr<Node> root;
-    public:
-        Tree() {
+        void selection() {
+            while (!cursor->untriedMoves.empty()) {
+                cursor = cursor->UCTSelectChild();
+            }            
         }
-        void changeRootToBestMove() {
-            int index = 0;
-            for (long unsigned int i = 0; i < root->children.size(); i++) {
-                if (root->children[i]->playedGames > root->children[index]->playedGames) {
-                    index = i;
-                }
-            }
-            root = std::move(root->children[index]);
+        void expansion() {
+            int index = rand() % cursor->children.size();
+            Location newMove = cursor->untriedMoves[index];
+            state.place(Placement{newMove, state.currentPlayer});
+            Node * newChild = new Node(state, cursor);
+            cursor->children.push_back(newChild);
+            cursor->untriedMoves.erase(cursor->untriedMoves.begin() + index); // erase from untried moves
+            cursor = newChild;
         }
-        void montecarlo() {
-            std::vector<Placement> placements(60);
-            int placementsSize = root->board.getPossibleMovements(&placements);
-            int childrenSize = root->children.size();
-            if (childrenSize < placementsSize) {
-                root->children.reserve(placementsSize - childrenSize);
-                for (int i = childrenSize; i < placementsSize; i++) {
-                    root->children[i] = placements[i];
-                }
-            }
-            for (int i = 0; i < placementsSize; i++) {
-                if (root->children[i].playedGames == 0) {
 
+        void simulation() {
+            std::vector<Location> moves;
+            while (!state.matrixIsFilled()) {
+                moves = state.getPossibleMoves();
+                state.place(Placement{moves[rand() % moves.size()], state.currentPlayer});
+            }
+        }
+
+        void backpropagation() {
+
+        }
+
+    public:
+        Node * root;
+        Node * cursor;
+        Board rootState;
+        Board state;
+
+        Tree() {
+            root = new Node(rootState);
+            cursor = root;
+        }
+
+        // Only call when at least 1 child
+        Node * mostVisitedChild() {
+            int n = root->children.size();
+            int max = 0;
+            Node * best;
+            for (int i = 0; i < n; i++) {
+                if (root->children[i]->playedGames > max) {
+                    max = root->children[i]->playedGames;
+                    best = root->children[i];
                 }
             }
+            return best;
+        }
+
+        void makeChildRoot(Node * newRoot) {
+            rootState.place(Placement{newRoot->move, rootState.currentPlayer});
+            root->makeChildRoot(newRoot);
+            root = newRoot;
+            cursor = root;
+        }
+
+        void MCTS(clock_t endTime) {
+            do {
+                state = Board(rootState);
+                selection();
+                expansion();
+                simulation();
+                backpropagation();
+            } while (clock() < endTime);
+        }
+
+        void printDOT() {
+            std::cout << "digraph BST {" << std::endl;
+            //TODO: BFS
+            std::cout << "}" << std::endl;
+        }
+
+        void advance(Location opponentMove) {
+            for (auto c : root->children) {
+                if (c->move == opponentMove) {
+                    makeChildRoot(c);
+                    break;
+                }
+            }
+            std::cerr << "Error: opponent did move that isn't a child" << std::endl;
+            exit(1);
         }
 };
-*/
+
 
 
 
@@ -325,7 +404,7 @@ Location parseString(std::string word) {
 }
 
 int main() {
-    Board b;
+    Tree t;
     std::string word;
     std::cin >> word;
     clock_t beginTime = clock();
@@ -333,19 +412,18 @@ int main() {
     if (word == "Start") {
         playerPiece = Black;
     } else {
-        b.place(Placement{parseString(word), playerPiece});
+        playerPiece = White;
+        t.state.place(Placement{parseString(word), playerPiece});
     }
     const clock_t extraTime = 0.14*CLOCKS_PER_SEC;
-    while (!b.matrixIsFilled()) {
-        Placement p = b.calculateBestMove(beginTime + extraTime);
-        //std::cout << "best location: " << std::endl;
-        p.location.print();
-        //std::cout << double(clock() - beginTime)/CLOCKS_PER_SEC << std::endl;
-        b.place(p);
-        //b.print();
+    while (t.state.matrixIsFilled()) {
+        t.MCTS(beginTime + extraTime);
+        Node * bestChild = t.mostVisitedChild();
+        bestChild->move.print();
+        t.makeChildRoot(bestChild);
         std::cin >> word;
         beginTime = clock();
-        b.place(Placement{parseString(word), playerPiece});
+        t.advance(parseString(word));
     }
 	return 0;
 }
