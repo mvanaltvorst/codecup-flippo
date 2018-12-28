@@ -260,7 +260,7 @@ class Board {
                     if (clock() > timeEnd) break;
                 }
             }
-            printVector(amountOfWins);
+            //printVector(amountOfWins);
             return possibleMovesRoot[std::max_element(amountOfWins.begin(), amountOfWins.end()) - amountOfWins.begin()];
         }
 };
@@ -286,7 +286,7 @@ int main() {
         Placement p = b.calculateBestMove(beginTime + extraTime);
         p.location.print();
         b.place(p);
-        b.print();
+        //b.print();
         std::cin >> word;
         beginTime = clock();
         b.place(Placement{parseString(word), b.playerPiece});
