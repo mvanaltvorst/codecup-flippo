@@ -219,7 +219,7 @@ class Board {
         std::vector<Location> getPossibleMoves() {
             std::vector<Location> out;
             //TODO: work out if this helps at all:
-            if (matrixIsFilled()) return out;
+            // if (matrixIsFilled()) return out;
             bool hasFlippingMove = false;
             for (uint8_t y = 0; y < 8; y++) {
                 for (uint8_t x = 0; x < 8; x++) {
@@ -251,9 +251,9 @@ class Board {
             // 30 is always a loss;
             int nbits = std::bitset<64>(colors).count();
             if (player == Black) {
-                return nbits < 30;
-            } else {
                 return nbits > 30;
+            } else {
+                return nbits < 30;
             }
             return false;
         }
@@ -309,7 +309,11 @@ class Node {
 
         float UCB1(float simulations) {
             float pg = float(playedGames);
-            return (float(wonGames) / pg) + sqrt(log(simulations) / pg);
+            try {
+                return (float(wonGames) / pg) + sqrt(log(simulations) / pg);
+            } catch (...) {
+                return 0; // just return 0 if it tries to take the sqrt of a negative number
+            }
         }
 
         void makeChildRoot(Node * newRoot) {
@@ -348,10 +352,7 @@ class Tree {
             Location move;
             while (!state.matrixIsFilled()) {
                 move = cursor->untriedMoves[rand() % cursor->untriedMoves.size()];
-                // std::cout << "doing move:";
-                // move.print();
                 state.place(Placement{move, state.currentPlayer});
-                // state.print();
                 Node * newChild = new Node(state, cursor);
                 newChild->move = move;
                 cursor->children.push_back(newChild);
@@ -363,7 +364,6 @@ class Tree {
                     )
                 );
                 cursor = newChild;
-                // std::cout << "Untried moves: " << cursor->untriedMoves.size() << std::endl;
             }
         }
 
@@ -421,30 +421,13 @@ class Tree {
 
         void MCTS(clock_t endTime) {
             do {
-            // for (int i = 0; i < 800; i++) {
-                // std::cout << "MCTS simulation" << std::endl;
-                // std::cerr << "Time left begin: " << endTime - clock() << std::endl;
                 state = Board(rootState);
-                // std::cout << "Selection" << std::endl;
-                if (selection()) expansion();
-                // std::cout << "Expansion" << std::endl;
-                // expansion();
-                // std::cout << "Simulation" << std::endl;
+                if (selection()) expansion();; // only expand if tree isn't already fully expanded
                 simulation();
-                // std::cout << "Backpropagation" << std::endl;
                 backpropagation();
-                // std::cerr << "Time left end: " << endTime - clock() << std::endl;
             } while (clock() < endTime);
-            // }
-            std::cerr << "---" << std::endl;
             std::cerr << "Played games: " << root->playedGames << std::endl;
             std::cerr << "Won games: " << root->wonGames << std::endl;
-        }
-
-        void printDOT() {
-            std::cout << "digraph BST {" << std::endl;
-            //TODO: BFS
-            std::cout << "}" << std::endl;
         }
 
         void advance(Location opponentMove) {
@@ -469,36 +452,29 @@ Location parseString(std::string word) {
 }
 
 int main() {
-    clock_t absBeginTime = clock();
-    Tree t(White);
+    Tree t(Black);
     std::string word;
     std::cin >> word;
     clock_t beginTime = clock();
     if (word == "Start") {
-        t = Tree(Black);
+        t = Tree(White);
     } else {
         Location l = parseString(word);
-        t.rootState.place(Placement{l, Black});
-        Node * newRoot = new Node(t.rootState, t.root);
+        t.state.place(Placement{l, White});
+        Node * newRoot = new Node(t.state, t.root);
         newRoot->move = l;
         t.root->children.push_back(newRoot);
         t.makeChildRoot(newRoot);
     }
-    // const clock_t extraTime = 0.05*CLOCKS_PER_SEC;
-    const clock_t extraTime = 0.13*CLOCKS_PER_SEC;
+    const clock_t extraTime = 0.15*CLOCKS_PER_SEC;
     while (!t.rootState.matrixIsFilled()) {
         t.MCTS(beginTime + extraTime);
-        // std::cerr << "MCTS done, timediff: " << static_cast<float>(clock() - absBeginTime) / CLOCKS_PER_SEC << std::endl;
         Node * bestChild = t.mostVisitedChild();
-        // std::cerr << "Current move: " << '0' + bestChild->move.x << ", " << '0' + bestChild->move.y << std::endl;
         bestChild->move.print();
-        // std::cerr << "Printed current move!" << std::endl;
         t.makeChildRoot(bestChild);
         std::cin >> word;
-        // std::cerr << "Timediff: " << static_cast<float>(clock() - absBeginTime) / CLOCKS_PER_SEC << std::endl;
         beginTime = clock();
         t.advance(parseString(word));
-        std::cerr << "Timediff since fork: " << static_cast<float>(clock() - absBeginTime) / CLOCKS_PER_SEC << std::endl;
     }
     // std::cout << "EOF" << std::endl;
 	return 0;
