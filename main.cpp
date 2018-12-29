@@ -23,7 +23,7 @@ enum Color {
 
 void printVector(std::vector<int> vec) {
     for (auto &v : vec) std::cout << v << ", ";
-    std::cout << std::endl;
+    std::cerr << std::endl;
 }
 
 struct Location {
@@ -119,8 +119,11 @@ class Board {
 		}
         
         // clone board
-        Board(Board& board) : occupied(board.occupied), colors(board.colors), currentPlayer(board.currentPlayer), movesPlayed(board.movesPlayed) {
-        }
+        Board(Board& board) : 
+            occupied(board.occupied), 
+            colors(board.colors), 
+            currentPlayer(board.currentPlayer), 
+            movesPlayed(board.movesPlayed) { }
 
         void flipLocation(Location location) {
             Color oldColor = getColor(location);
@@ -128,10 +131,11 @@ class Board {
         }
 		
 		void print() {
+            std::vector<Location> moves = getPossibleMoves();
 			for (uint8_t i = 0; i < 8; i++) {
 				for (uint8_t j = 0; j < 8; j++) {
 					if (!isOccupied(j, i)) {
-                        if (doesMoveFlip({Location{j, i}, currentPlayer})) std::cerr << "#";
+                        if (std::find(moves.begin(), moves.end(), Location{j, i}) != moves.end()) std::cerr << "#";
 						else std::cerr << '.';
 						continue;
 					}
@@ -218,6 +222,7 @@ class Board {
         // returns amount of placements written to vector
         std::vector<Location> getPossibleMoves() {
             std::vector<Location> out;
+            out.reserve(30);
             //TODO: work out if this helps at all:
             // if (matrixIsFilled()) return out;
             bool hasFlippingMove = false;
@@ -233,10 +238,14 @@ class Board {
             }           
             if (!hasFlippingMove) {
                 // just place it somewhere next to an old stone
+                Location toTry;
                 for (uint8_t y = 0; y < 8; y++) {
                     for (uint8_t x = 0; x < 8; x++) {
+                        if (isOccupied(x, y)) continue;
                         for (auto &d : directions) {
-                            if (isOccupied(x + d.first, y + d.second)) {
+                            toTry = Location{x + d.first, y + d.second};
+                            if (!toTry.isInBounds()) continue;
+                            if (isOccupied(toTry)) {
                                 out.push_back(Location{x, y});
                                 break;
                             }
@@ -247,15 +256,16 @@ class Board {
             return out;
         }
         
-        bool isWinner(Color player) {
+        int getReward(Color player) {
             // 30 is always a loss;
             int nbits = std::bitset<64>(colors).count();
+            if (nbits == 30) return 1;
             if (player == Black) {
-                return nbits > 30;
+                if (nbits > 30) return 2;
             } else {
-                return nbits < 30;
+                if (nbits < 30) return 2;
             }
-            return false;
+            return 0;
         }
 };
 
@@ -266,7 +276,7 @@ class Node {
         Node * parent;
         std::vector<Node*> children;
         std::vector<Location> untriedMoves;
-        int wonGames = 0;
+        int reward = 0;
         int playedGames = 0;
         Color playerToMove;
         
@@ -310,7 +320,7 @@ class Node {
         float UCB1(float simulations) {
             float pg = float(playedGames);
             try {
-                return (float(wonGames) / pg) + sqrt(log(simulations) / pg);
+                return (float(reward) / (2*pg)) + sqrt(log(simulations) / pg);
             } catch (...) {
                 return 0; // just return 0 if it tries to take the sqrt of a negative number
             }
@@ -368,21 +378,14 @@ class Tree {
         }
 
         void backpropagation() {
-            if (state.isWinner(playerPiece)) {
-                while (cursor != root) {
-                    cursor->wonGames++;
-                    cursor->playedGames++;
-                    cursor = cursor->parent;
-                }
-                root->playedGames++;
-                root->wonGames++;
-            } else {
-                while (cursor != root) {
-                    cursor->playedGames++;
-                    cursor = cursor->parent;
-                }
-                root->playedGames++;
+            int bonus = state.getReward(playerPiece);
+            while (cursor != root) {
+                cursor->reward += bonus;
+                cursor->playedGames++;
+                cursor = cursor->parent;
             }
+            root->playedGames++;
+            root->reward += bonus;
         }
 
     public:
@@ -426,8 +429,11 @@ class Tree {
                 simulation();
                 backpropagation();
             } while (clock() < endTime);
+            for (auto c : root->children) {
+                std::cerr << static_cast<char>(c->move.y + 'A') << static_cast<char>(c->move.x + '1') << ' ' << c->UCB1(static_cast<float>(root->playedGames)) << "\n\tplayed: " << c->playedGames << "\n\twon: " << static_cast<float>(c->reward) / 2 << std::endl;
+            }
             std::cerr << "Played games: " << root->playedGames << std::endl;
-            std::cerr << "Won games: " << root->wonGames << std::endl;
+            std::cerr << "Won games: " << static_cast<float>(root->reward) / 2 << std::endl;
         }
 
         void advance(Location opponentMove) {
@@ -452,13 +458,17 @@ Location parseString(std::string word) {
 }
 
 int main() {
+    clock_t absEndTime = clock() + 4.90*CLOCKS_PER_SEC;
     Tree t(Black);
     std::string word;
     std::cin >> word;
     clock_t beginTime = clock();
     if (word == "Start") {
+        std::cerr << "I'm white" << std::endl;
         t = Tree(White);
     } else {
+        std::cerr << "I'm black, other did move" << word << std::endl;
+        std::cerr << "Got board:" << std::endl;
         Location l = parseString(word);
         t.state.place(Placement{l, White});
         Node * newRoot = new Node(t.state, t.root);
@@ -466,13 +476,28 @@ int main() {
         t.root->children.push_back(newRoot);
         t.makeChildRoot(newRoot);
     }
-    const clock_t extraTime = 0.15*CLOCKS_PER_SEC;
+    clock_t extraTime;
     while (!t.rootState.matrixIsFilled()) {
+        if (t.rootState.movesPlayed > 20 && t.rootState.movesPlayed < 40) { 
+        // if (t.rootState.movesPlayed < 20) {
+        // if (t.rootState.movesPlayed > 40 && t.rootState.movesPlayed < 55) {
+            extraTime = 0.2*CLOCKS_PER_SEC;
+        } else {
+            if (t.playerPiece == White) {
+                extraTime = (absEndTime - beginTime) / (60 - t.rootState.movesPlayed);
+            } else {
+                extraTime = (absEndTime - beginTime) / (62 - t.rootState.movesPlayed);
+            }
+        }
+
         t.MCTS(beginTime + extraTime);
         Node * bestChild = t.mostVisitedChild();
+        std::cerr << "Calculated best move for me:" << std::endl;
         bestChild->move.print();
+        std::cerr << "New board:" << std::endl;
         t.makeChildRoot(bestChild);
         std::cin >> word;
+        std::cerr << "Got new move from opponent: " << word << std::endl;
         beginTime = clock();
         t.advance(parseString(word));
     }
