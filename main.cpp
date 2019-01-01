@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cmath>
 
+#define BIAS 1.0
+
 const std::pair<int, int> directions[8] {
     std::make_pair(0, 1),
     std::make_pair(1, 1),
@@ -65,7 +67,6 @@ class Board {
 		void set(uint8_t x, uint8_t y, Color piece) {
 			occupied |= (1ULL << (8*y + x));
             if (piece == Black)	colors |= (1ULL << (8*y + x));
-            //std::cout << std::bitset<64>(colors) << std::endl;
 		}
 
         // overwrites old
@@ -147,7 +148,7 @@ class Board {
 				}
 				std::cerr << std::endl;
 			}
-            std::cerr << std::endl;
+            // std::cerr << std::endl;
 		}
 
         bool matrixIsFilled() {
@@ -267,6 +268,36 @@ class Board {
             }
             return 0;
         }
+
+        Location getMostGreedyMove(std::vector<Location> &moves) {
+            Location mostGreedy;
+            Board state;
+            int prevMaxStones = 0;
+
+            if (currentPlayer == Black) {
+                for (auto move : moves) {
+                    state = Board(*this);
+                    state.place(Placement{move, Black});
+                    int stones = std::bitset<64>(state.colors).count();
+                    if (stones > prevMaxStones) {
+                        prevMaxStones = stones;
+                        mostGreedy = move;
+                    }
+                }   
+            } else {
+                for (auto move : moves) {
+                    state = Board(*this);
+                    state.place(Placement{move, Black});
+                    int stones = std::bitset<64>((~state.colors) && state.occupied).count();
+                    if (stones > prevMaxStones) {
+                        prevMaxStones = stones;
+                        mostGreedy = move;
+                    }
+                }   
+            }
+
+            return mostGreedy;
+        }
 };
 
 
@@ -298,30 +329,32 @@ class Node {
             }
         }
 
-        // returns child with highest UCB1
-        Node * UCTSelectChild() {
+        // returns child with highest UCT
+        Node * UCTSelectChild(bool opponent) {
             float mx = -1;
             float other;
-            float simulations = static_cast<float>(playedGames);
+            float logSimulations = log(static_cast<float>(playedGames));
             Node * best;
             for (auto c : children) {
-                // std::cout << simulations << std::endl;
-                other = c->UCB1(simulations); 
-                // std::cout << other << std::endl;
+                other = c->UCT(logSimulations, opponent); 
                 if (other > mx) {
                     mx = other;
                     best = c;
                 }
             }
-            // std::cout << mx << std::endl;
             return best;
         }
 
-        float UCB1(float simulations) {
+        float UCT(float logSimulations, bool opponent) {
             float pg = float(playedGames);
             try {
-                return (float(reward) / (2*pg)) + sqrt(log(simulations) / pg);
+                if (opponent) {
+                    return ((pg - (float(reward)/2)) / pg) + BIAS*sqrt(logSimulations / pg);
+                } else {
+                    return (float(reward) / (2*pg)) + BIAS*sqrt(logSimulations / pg);
+                }
             } catch (...) {
+                std::cerr << "Something wrong in UCT" << std::endl;
                 return 0; // just return 0 if it tries to take the sqrt of a negative number
             }
         }
@@ -338,16 +371,17 @@ class Node {
 
 class Tree {
     private:
+        // returns true if there's still nodes to be expanded at the end, false if game state is terminal
         bool selection() {
             while (cursor->untriedMoves.empty()) {
-                cursor = cursor->UCTSelectChild();
+                cursor = cursor->UCTSelectChild(state.currentPlayer != playerPiece);
                 state.place(Placement{cursor->move, state.currentPlayer});
                 if (state.matrixIsFilled()) return false;
             }            
             return true;
         }
+
         void expansion() {
-            // if (state.matrixIsFilled()) return;
             int index = rand() % cursor->untriedMoves.size();
             Location newMove = cursor->untriedMoves[index];
             state.place(Placement{newMove, state.currentPlayer});
@@ -362,6 +396,7 @@ class Tree {
             Location move;
             while (!state.matrixIsFilled()) {
                 move = cursor->untriedMoves[rand() % cursor->untriedMoves.size()];
+                // move = state.getMostGreedyMove(cursor->untriedMoves);
                 state.place(Placement{move, state.currentPlayer});
                 Node * newChild = new Node(state, cursor);
                 newChild->move = move;
@@ -430,7 +465,8 @@ class Tree {
                 backpropagation();
             } while (clock() < endTime);
             for (auto c : root->children) {
-                std::cerr << static_cast<char>(c->move.y + 'A') << static_cast<char>(c->move.x + '1') << ' ' << c->UCB1(static_cast<float>(root->playedGames)) << "\n\tplayed: " << c->playedGames << "\n\twon: " << static_cast<float>(c->reward) / 2 << std::endl;
+                //std::cerr << static_cast<char>(c->move.y + 'A') << static_cast<char>(c->move.x + '1') << ' ' << c->UCT(log(static_cast<float>(root->playedGames))) << "\n\tplayed: " << c->playedGames << "\n\twon: " << static_cast<float>(c->reward) / 2 << std::endl;
+                std::cerr << static_cast<char>(c->move.y + 'A') << static_cast<char>(c->move.x + '1') << "\n\tplayed: " << c->playedGames << "\n\twon: " << static_cast<float>(c->reward) / 2 << std::endl;
             }
             std::cerr << "Played games: " << root->playedGames << std::endl;
             std::cerr << "Won games: " << static_cast<float>(root->reward) / 2 << std::endl;
@@ -458,7 +494,7 @@ Location parseString(std::string word) {
 }
 
 int main() {
-    clock_t absEndTime = clock() + 4.90*CLOCKS_PER_SEC;
+    clock_t absEndTime = clock() + 4.7*CLOCKS_PER_SEC;
     Tree t(Black);
     std::string word;
     std::cin >> word;
@@ -467,7 +503,7 @@ int main() {
         std::cerr << "I'm white" << std::endl;
         t = Tree(White);
     } else {
-        std::cerr << "I'm black, other did move" << word << std::endl;
+        std::cerr << "I'm black, other did move " << word << std::endl;
         std::cerr << "Got board:" << std::endl;
         Location l = parseString(word);
         t.state.place(Placement{l, White});
@@ -478,18 +514,30 @@ int main() {
     }
     clock_t extraTime;
     while (!t.rootState.matrixIsFilled()) {
-        if (t.rootState.movesPlayed > 20 && t.rootState.movesPlayed < 40) { 
-        // if (t.rootState.movesPlayed < 20) {
-        // if (t.rootState.movesPlayed > 40 && t.rootState.movesPlayed < 55) {
+        /*if (t.rootState.movesPlayed <= 20) {
+            extraTime = extraTime = 0.15*CLOCKS_PER_SEC;
+        } else if (t.rootState.movesPlayed > 20 && t.rootState.movesPlayed <= 40) { 
             extraTime = 0.2*CLOCKS_PER_SEC;
         } else {
             if (t.playerPiece == White) {
-                extraTime = (absEndTime - beginTime) / (60 - t.rootState.movesPlayed);
+                extraTime = 2*(absEndTime - beginTime) / (59 - t.rootState.movesPlayed);
             } else {
-                extraTime = (absEndTime - beginTime) / (62 - t.rootState.movesPlayed);
+                extraTime = 2*(absEndTime - beginTime) / (60 - t.rootState.movesPlayed);
+            }
+        }*/
+        
+        if (t.rootState.movesPlayed < 20) {
+            extraTime = extraTime = 0.3*CLOCKS_PER_SEC;
+        } else {
+            if (t.playerPiece == White) {
+                extraTime = 2*(absEndTime - beginTime) / (59 - t.rootState.movesPlayed);
+            } else {
+                extraTime = 2*(absEndTime - beginTime) / (60 - t.rootState.movesPlayed);
             }
         }
 
+        std::cerr << "Doing MCTS for " << static_cast<float>(extraTime)/CLOCKS_PER_SEC << " seconds," << std::endl;
+        std::cerr << "Time left: " << static_cast<float>(absEndTime - clock()) / CLOCKS_PER_SEC << std::endl;
         t.MCTS(beginTime + extraTime);
         Node * bestChild = t.mostVisitedChild();
         std::cerr << "Calculated best move for me:" << std::endl;
@@ -501,6 +549,5 @@ int main() {
         beginTime = clock();
         t.advance(parseString(word));
     }
-    // std::cout << "EOF" << std::endl;
 	return 0;
 }
