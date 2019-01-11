@@ -23,11 +23,6 @@ enum Color {
     White
 };
 
-void printVector(std::vector<int> vec) {
-    for (auto &v : vec) std::cout << v << ", ";
-    std::cerr << std::endl;
-}
-
 struct Location {
 	uint8_t x;
 	uint8_t y;
@@ -42,7 +37,6 @@ struct Location {
     }
     void print() {
         std::cout << static_cast<char>(y + 'A') << static_cast<char>(x + '1') << std::endl;
-        std::cerr << static_cast<char>(y + 'A') << static_cast<char>(x + '1') << std::endl;
     }
 };
 
@@ -131,25 +125,25 @@ class Board {
             setColor(location.x, location.y, flip(oldColor)); 
         }
 		
-		void print() {
-            std::vector<Location> moves = getPossibleMoves();
-			for (uint8_t i = 0; i < 8; i++) {
-				for (uint8_t j = 0; j < 8; j++) {
-					if (!isOccupied(j, i)) {
-                        if (std::find(moves.begin(), moves.end(), Location{j, i}) != moves.end()) std::cerr << "#";
-						else std::cerr << '.';
-						continue;
-					}
-					if (getColor(j, i) == Black) {
-						std::cerr << 'b';
-					} else {
-						std::cerr << 'w';
-					}
-				}
-				std::cerr << std::endl;
-			}
-            // std::cerr << std::endl;
-		}
+		// void print() {
+        //     std::vector<Location> moves = getPossibleMoves();
+		// 	for (uint8_t i = 0; i < 8; i++) {
+		// 		for (uint8_t j = 0; j < 8; j++) {
+		// 			if (!isOccupied(j, i)) {
+        //                 if (std::find(moves.begin(), moves.end(), Location{j, i}) != moves.end()) std::cerr << "#";
+		// 				else std::cerr << '.';
+		// 				continue;
+		// 			}
+		// 			if (getColor(j, i) == Black) {
+		// 				std::cerr << 'b';
+		// 			} else {
+		// 				std::cerr << 'w';
+		// 			}
+		// 		}
+		// 		std::cerr << std::endl;
+		// 	}
+        //     // std::cerr << std::endl;
+		// }
 
         bool matrixIsFilled() {
             return movesPlayed >= 60;
@@ -191,7 +185,6 @@ class Board {
             }
             movesPlayed++;
             currentPlayer = flip(currentPlayer);
-            // std::cout << currentPlayer << std::endl;
 		}
 
         // check whether a placement makes a single flip or more
@@ -451,7 +444,7 @@ class Tree {
 
         void makeChildRoot(Node * newRoot) {
             rootState.place(Placement{newRoot->move, rootState.currentPlayer});
-            rootState.print();
+            // rootState.print();
             root->makeChildRoot(newRoot);
             root = newRoot;
             cursor = root;
@@ -464,12 +457,12 @@ class Tree {
                 simulation();
                 backpropagation();
             } while (clock() < endTime);
-            for (auto c : root->children) {
-                //std::cerr << static_cast<char>(c->move.y + 'A') << static_cast<char>(c->move.x + '1') << ' ' << c->UCT(log(static_cast<float>(root->playedGames))) << "\n\tplayed: " << c->playedGames << "\n\twon: " << static_cast<float>(c->reward) / 2 << std::endl;
-                std::cerr << static_cast<char>(c->move.y + 'A') << static_cast<char>(c->move.x + '1') << "\n\tplayed: " << c->playedGames << "\n\twon: " << static_cast<float>(c->reward) / 2 << std::endl;
-            }
-            std::cerr << "Played games: " << root->playedGames << std::endl;
-            std::cerr << "Won games: " << static_cast<float>(root->reward) / 2 << std::endl;
+            // for (auto c : root->children) {
+            //     //std::cerr << static_cast<char>(c->move.y + 'A') << static_cast<char>(c->move.x + '1') << ' ' << c->UCT(log(static_cast<float>(root->playedGames))) << "\n\tplayed: " << c->playedGames << "\n\twon: " << static_cast<float>(c->reward) / 2 << std::endl;
+            //     std::cerr << static_cast<char>(c->move.y + 'A') << static_cast<char>(c->move.x + '1') << "\n\tplayed: " << c->playedGames << "\n\twon: " << static_cast<float>(c->reward) / 2 << std::endl;
+            // }
+            // std::cerr << "Played games: " << root->playedGames << std::endl;
+            // std::cerr << "Won games: " << static_cast<float>(root->reward) / 2 << std::endl;
         }
 
         void advance(Location opponentMove) {
@@ -479,7 +472,7 @@ class Tree {
                     return;
                 }
             }
-            std::cerr << "Error: opponent did move that isn't a child" << std::endl;
+            // std::cerr << "Error: opponent did move that isn't a child" << std::endl;
             exit(1);
         }
 };
@@ -500,11 +493,11 @@ int main() {
     std::cin >> word;
     clock_t beginTime = clock();
     if (word == "Start") {
-        std::cerr << "I'm white" << std::endl;
+        // std::cerr << "I'm white" << std::endl;
         t = Tree(White);
     } else {
-        std::cerr << "I'm black, other did move " << word << std::endl;
-        std::cerr << "Got board:" << std::endl;
+        // std::cerr << "I'm black, other did move " << word << std::endl;
+        // std::cerr << "Got board:" << std::endl;
         Location l = parseString(word);
         t.state.place(Placement{l, White});
         Node * newRoot = new Node(t.state, t.root);
@@ -526,8 +519,9 @@ int main() {
             }
         }*/
         
+        //if (t.rootState.movesPlayed >= 10 && t.rootState.movesPlayed < 30) {
         if (t.rootState.movesPlayed < 20) {
-            extraTime = extraTime = 0.3*CLOCKS_PER_SEC;
+            extraTime = 0.27*CLOCKS_PER_SEC; // winner after testing: 0.30
         } else {
             if (t.playerPiece == White) {
                 extraTime = 2*(absEndTime - beginTime) / (59 - t.rootState.movesPlayed);
@@ -536,16 +530,16 @@ int main() {
             }
         }
 
-        std::cerr << "Doing MCTS for " << static_cast<float>(extraTime)/CLOCKS_PER_SEC << " seconds," << std::endl;
-        std::cerr << "Time left: " << static_cast<float>(absEndTime - clock()) / CLOCKS_PER_SEC << std::endl;
+        // std::cerr << "Doing MCTS for " << static_cast<float>(extraTime)/CLOCKS_PER_SEC << " seconds," << std::endl;
+        // std::cerr << "Time left: " << static_cast<float>(absEndTime - clock()) / CLOCKS_PER_SEC << std::endl;
         t.MCTS(beginTime + extraTime);
         Node * bestChild = t.mostVisitedChild();
-        std::cerr << "Calculated best move for me:" << std::endl;
+        // std::cerr << "Calculated best move for me:" << std::endl;
         bestChild->move.print();
-        std::cerr << "New board:" << std::endl;
+        // std::cerr << "New board:" << std::endl;
         t.makeChildRoot(bestChild);
         std::cin >> word;
-        std::cerr << "Got new move from opponent: " << word << std::endl;
+        // std::cerr << "Got new move from opponent: " << word << std::endl;
         beginTime = clock();
         t.advance(parseString(word));
     }
