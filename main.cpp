@@ -5,7 +5,7 @@
 #include <algorithm>
 #include <cmath>
 
-#define BIAS 1.0
+#define BIAS 1.0 // 1.0 worked best in my experiments
 
 const std::pair<int, int> directions[8] {
     std::make_pair(0, 1),
@@ -124,26 +124,6 @@ class Board {
             Color oldColor = getColor(location);
             setColor(location.x, location.y, flip(oldColor)); 
         }
-		
-		// void print() {
-        //     std::vector<Location> moves = getPossibleMoves();
-		// 	for (uint8_t i = 0; i < 8; i++) {
-		// 		for (uint8_t j = 0; j < 8; j++) {
-		// 			if (!isOccupied(j, i)) {
-        //                 if (std::find(moves.begin(), moves.end(), Location{j, i}) != moves.end()) std::cerr << "#";
-		// 				else std::cerr << '.';
-		// 				continue;
-		// 			}
-		// 			if (getColor(j, i) == Black) {
-		// 				std::cerr << 'b';
-		// 			} else {
-		// 				std::cerr << 'w';
-		// 			}
-		// 		}
-		// 		std::cerr << std::endl;
-		// 	}
-        //     // std::cerr << std::endl;
-		// }
 
         bool matrixIsFilled() {
             return movesPlayed >= 60;
@@ -213,7 +193,6 @@ class Board {
         }
 
         // gets possible moves for currentPlayer
-        // returns amount of placements written to vector
         std::vector<Location> getPossibleMoves() {
             std::vector<Location> out;
             out.reserve(30);
@@ -251,7 +230,9 @@ class Board {
         }
         
         int getReward(Color player) {
-            // 30 is always a loss;
+            // win = 2
+            // draw = 1
+            // loss = 0
             int nbits = std::bitset<64>(colors).count();
             if (nbits == 30) return 1;
             if (player == Black) {
@@ -293,6 +274,14 @@ class Board {
         }
 };
 
+
+/*
+I'm using Monte Carlo Tree Search to calculate the best move. To do this,
+I need to store all visited gamestates in a tree. The `Tree` class contains
+a root node (the current gamestate). Each node has a std::vector of child nodes.
+To save memory, the nodes don't store a whole board. They only store the move that
+should be placed in order to get to the node's gamestate.
+*/
 
 class Node {
     public:
@@ -352,6 +341,7 @@ class Node {
             }
         }
 
+        // should only be used on the current root node
         void makeChildRoot(Node * newRoot) {
             int n = children.size();
             for (int i = 0; i < n; i++) {
@@ -389,7 +379,6 @@ class Tree {
             Location move;
             while (!state.matrixIsFilled()) {
                 move = cursor->untriedMoves[rand() % cursor->untriedMoves.size()];
-                // move = state.getMostGreedyMove(cursor->untriedMoves);
                 state.place(Placement{move, state.currentPlayer});
                 Node * newChild = new Node(state, cursor);
                 newChild->move = move;
@@ -428,7 +417,7 @@ class Tree {
             cursor = root;
         }
 
-        // Only call when at least 1 child
+        // Only call when there's at least 1 child
         Node * mostVisitedChild() {
             int n = root->children.size();
             int max = 0;
@@ -457,12 +446,6 @@ class Tree {
                 simulation();
                 backpropagation();
             } while (clock() < endTime);
-            // for (auto c : root->children) {
-            //     //std::cerr << static_cast<char>(c->move.y + 'A') << static_cast<char>(c->move.x + '1') << ' ' << c->UCT(log(static_cast<float>(root->playedGames))) << "\n\tplayed: " << c->playedGames << "\n\twon: " << static_cast<float>(c->reward) / 2 << std::endl;
-            //     std::cerr << static_cast<char>(c->move.y + 'A') << static_cast<char>(c->move.x + '1') << "\n\tplayed: " << c->playedGames << "\n\twon: " << static_cast<float>(c->reward) / 2 << std::endl;
-            // }
-            // std::cerr << "Played games: " << root->playedGames << std::endl;
-            // std::cerr << "Won games: " << static_cast<float>(root->reward) / 2 << std::endl;
         }
 
         void advance(Location opponentMove) {
@@ -472,8 +455,6 @@ class Tree {
                     return;
                 }
             }
-            // std::cerr << "Error: opponent did move that isn't a child" << std::endl;
-            exit(1);
         }
 };
 
@@ -507,19 +488,6 @@ int main() {
     }
     clock_t extraTime;
     while (!t.rootState.matrixIsFilled()) {
-        /*if (t.rootState.movesPlayed <= 20) {
-            extraTime = extraTime = 0.15*CLOCKS_PER_SEC;
-        } else if (t.rootState.movesPlayed > 20 && t.rootState.movesPlayed <= 40) { 
-            extraTime = 0.2*CLOCKS_PER_SEC;
-        } else {
-            if (t.playerPiece == White) {
-                extraTime = 2*(absEndTime - beginTime) / (59 - t.rootState.movesPlayed);
-            } else {
-                extraTime = 2*(absEndTime - beginTime) / (60 - t.rootState.movesPlayed);
-            }
-        }*/
-        
-        //if (t.rootState.movesPlayed >= 10 && t.rootState.movesPlayed < 30) {
         if (t.rootState.movesPlayed < 20) {
             extraTime = 0.27*CLOCKS_PER_SEC; // winner after testing: 0.30
         } else {
